@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مطابقة الفيديو مع السكريبت</title>
+<style>
+  :root{--bg:#f7f7f5;--fg:#1c1c1a;--card:#fff;--bd:#dcdcd6;--ac:#2f5bd8;--mut:#6b6b64}
+  @media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#eee;--card:#202020;--bd:#3a3a38;--ac:#7c9cff;--mut:#9a9a92}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.7}
+  main{max-width:760px;margin:0 auto;padding:32px 16px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:20px;margin-bottom:16px}
+  .btn{display:inline-block;background:var(--ac);color:#fff;text-decoration:none;border-radius:8px;padding:12px 22px;margin-top:8px}
+  .btn.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+  .mut{color:var(--mut);font-size:.92rem} ol{padding-inline-start:20px}
+</style>
+</head>
+<body>
+<main>
+  <h1>مطابقة الفيديو مع السكريبت</h1>
+  <p class="mut">ارفع فيديو طويلاً مع سكريبت، ويختار لك الذكاء الاصطناعي اللقطات المناسبة بالدقيقة والثانية، ويركّب لك فيديو قصيراً.</p>
+  <div class="card">
+    <h2>النسخة الدقيقة (مجانية، GPU من Google)</h2>
+    <p>تسمع الفيديو وتشاهده وتفهم السكريبت بأي لغة. تفتحها بزر واحد.</p>
+    <ol class="mut"><li>اضغط الزر وادخل بحساب Google.</li><li>اختر Runtime ← Change runtime type ← T4 GPU.</li><li>اضغط Runtime ← Run all، ثم افتح رابط gradio.live الذي يظهر.</li></ol>
+    <a class="btn" id="colab" href="#" target="_blank" rel="noopener">افتح في Colab</a>
+  </div>
+  <div class="card">
+    <h2>النسخة الخفيفة (داخل المتصفح)</h2>
+    <p class="mut">تحتاج ملف ترجمة SRT بنفس لغة السكريبت، ودقتها أقل.</p>
+    <a class="btn sec" href="tool.html">افتح الأداة</a>
+  </div>
+</main>
+<script>
+  // غيّر هذا السطر إلى اسم حسابك واسم المستودع في GitHub
+  const GITHUB_REPO = "USERNAME/video-script-matcher";
+  document.getElementById("colab").href =
+    "https://colab.research.google.com/github/" + GITHUB_REPO + "/blob/main/colab/video-script-matcher.ipynb";
+</script>
+</body>
+</html>

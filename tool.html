@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مطابقة الفيديو مع السكريبت (محلي)</title>
+<style>
+  :root{--bg:#f7f7f5;--fg:#1c1c1a;--card:#fff;--bd:#dcdcd6;--ac:#2f5bd8;--mut:#6b6b64}
+  @media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#eee;--card:#202020;--bd:#3a3a38;--ac:#7c9cff;--mut:#9a9a92}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.6}
+  main{max-width:860px;margin:0 auto;padding:24px 16px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px;margin-bottom:16px}
+  label{display:block;font-weight:600;margin:12px 0 6px}
+  input,textarea,button{font:inherit;color:inherit}
+  input[type=file],input[type=number],textarea{width:100%;padding:8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg)}
+  textarea{min-height:160px;resize:vertical}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>div{flex:1;min-width:200px}
+  button,.btn{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;margin:12px 8px 0 0;display:inline-block;text-decoration:none}
+  button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden;margin:10px 0}
+  .bar>i{display:block;height:100%;width:0;background:var(--ac)}
+  .mut{color:var(--mut);font-size:.9rem}.err{color:#d33}
+  video{width:100%;border-radius:8px;background:#000;margin-top:8px}
+  .plan div{padding:8px 0;border-top:1px solid var(--bd)}
+  .plan b{direction:ltr;unicode-bidi:embed;display:inline-block;min-width:110px}
+</style>
+</head>
+<body>
+<main>
+  <h1>مطابقة الفيديو مع السكريبت</h1>
+  <p class="mut">يعمل بالكامل داخل متصفحك (Chrome أو Edge). لا يُرفع أي شيء إلى الإنترنت. يحتاج ملف ترجمة SRT أو VTT للفيديو. للتفريغ التلقائي والدقة الأعلى استخدم نسخة Colab.</p>
+  <div class="card">
+    <label for="vf">الفيديو</label><input type="file" id="vf" accept="video/*">
+    <label for="sf">ملف الترجمة (SRT / VTT)</label><input type="file" id="sf" accept=".srt,.vtt,text/plain">
+    <label for="sc">السكريبت (الصق النص أو اختر ملف .txt)</label>
+    <input type="file" id="scf" accept=".txt,text/plain">
+    <textarea id="sc" placeholder="الصق السكريبت هنا..."></textarea>
+    <div class="row"><div><label for="tg">المدة المطلوبة (ثانية)</label><input type="number" id="tg" value="300" min="30" max="1800"></div></div>
+    <button id="an">1) حلّل واختر اللقطات</button>
+    <div class="err" id="er"></div>
+  </div>
+  <div class="card" id="pc" hidden>
+    <b>اللقطات المختارة</b> <span class="mut" id="tot"></span>
+    <div class="plan" id="plan"></div>
+    <button id="rd">2) أنتج الفيديو (يستغرق مدة الفيديو نفسها تقريباً)</button>
+    <button class="sec" id="csv">تصدير القائمة CSV</button>
+    <p class="mut">أثناء الإنتاج أبقِ هذه التبويبة ظاهرة ولا تنتقل عنها، وسيُسمع صوت الفيديو أثناء التسجيل.</p>
+    <div class="bar" id="bw" hidden><i id="bf"></i></div><div class="mut" id="st"></div>
+  </div>
+  <div class="card" id="rc" hidden>
+    <b>الفيديو النهائي</b>
+    <video id="out" controls></video>
+    <a class="btn" id="dl" download="final.webm">تحميل الفيديو (WebM)</a>
+  </div>
+  <video id="vid" hidden playsinline preload="auto"></video>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const STEP = 2, MINC = 4, MAXC = 30;
+let plan = [];
+const fmt = s => { s = Math.round(s); return Math.floor(s/60) + ":" + String(s%60).padStart(2,"0"); };
+
+// ---------- ترجمة SRT/VTT
+function parseSubs(txt) {
+  const ts = x => { const m = x.trim().replace(",", ".").split(":").map(Number);
+    return m.length === 3 ? m[0]*3600 + m[1]*60 + m[2] : m[0]*60 + m[1]; };
+  const cues = [];
+  for (const blk of txt.replace(/\r/g, "").split(/\n\s*\n/)) {
+    const L = blk.split("\n"), i = L.findIndex(l => l.includes("-->"));
+    if (i < 0) continue;
+    const [a, b] = L[i].split("-->");
+    const text = L.slice(i + 1).join(" ").replace(/<[^>]+>/g, "").trim();
+    if (text) cues.push({ s: ts(a), e: ts(b.trim().split(" ")[0]), t: text });
+  }
+  return cues;
+}
+
+// ---------- معالجة النص العربي/الإنجليزي
+const STOP = new Set("في من على الى عن ان هذا هذه ذلك التي الذي ما لا هو هي كان مع او ثم قد كل بعد the a an of to and in is it that for on with as".split(" "));
+const norm = s => s.toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, "").replace(/[إأآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
+const tok = s => (norm(s).match(/[\p{L}\p{N}]+/gu) || [])
+  .map(w => w.replace(/^(وال|بال|كال|فال|لل|ال)/, "")).filter(w => w.length > 1 && !STOP.has(w));
+
+function splitScript(text, target) {
+  const sents = text.replace(/[ \t]+/g, " ").split(/(?<=[.!?؟…])\s+|\n+/).map(s => s.trim()).filter(Boolean);
+  if (!sents.length) throw new Error("السكريبت فارغ");
+  const maxSeg = Math.max(1, Math.floor(target / MINC));
+  let minW = 15;
+  for (;;) {
+    const g = []; let cur = [], n = 0;
+    for (const s of sents) { cur.push(s); n += s.split(/\s+/).length; if (n >= minW) { g.push(cur.join(" ")); cur = []; n = 0; } }
+    if (cur.length) { if (g.length && n < minW / 2) g[g.length-1] += " " + cur.join(" "); else g.push(cur.join(" ")); }
+    if (g.length <= maxSeg) return g;
+    minW = Math.floor(minW * 1.5) + 1;
+  }
+}
+function allocate(groups, target, avail) {
+  const w = groups.map(g => Math.max(1, g.split(/\s+/).length)), sw = w.reduce((a,b)=>a+b,0);
+  let d = w.map(x => x / sw * target);
+  for (let k = 0; k < 20; k++) { const s = d.reduce((a,b)=>a+b,0); d = d.map(x => Math.min(MAXC, Math.max(MINC, x * target / s))); }
+  return d.map(x => Math.min(x, avail));
+}
+
+// ---------- TF-IDF
+function buildScores(groups, cues, G) {
+  const near = (a, b) => a && b && Math.abs(a.e - b.s) <= 2 || (a && b && Math.abs(b.e - a.s) <= 2);
+  const docs = cues.map((c, i) => {
+    const own = tok(c.t), side = [cues[i-1], cues[i+1]].filter(x => near(c, x)).flatMap(x => tok(x.t));
+    return [...own, ...own, ...side];
+  });
+  const df = new Map();
+  docs.forEach(d => new Set(d).forEach(w => df.set(w, (df.get(w) || 0) + 1)));
+  const idf = w => Math.log(1 + docs.length / (1 + (df.get(w) || 0)));
+  const vec = ws => { const m = new Map(); ws.forEach(w => m.set(w, (m.get(w) || 0) + 1));
+    let n = 0; for (const [w, c] of m) { const v = (1 + Math.log(c)) * idf(w); m.set(w, v); n += v*v; }
+    n = Math.sqrt(n) || 1; for (const [w, v] of m) m.set(w, v / n); return m; };
+  const dv = docs.map(vec);
+  return groups.map(g => {
+    const q = vec(tok(g)), row = new Float64Array(G);
+    dv.forEach((d, j) => {
+      let s = 0; for (const [w, v] of q) s += v * (d.get(w) || 0);
+      const g0 = Math.min(G-1, Math.floor(cues[j].s / STEP)), g1 = Math.min(G-1, Math.floor(cues[j].e / STEP));
+      for (let k = g0; k <= g1; k++) row[k] = Math.max(row[k], s);
+    });
+    const mean = row.reduce((a,b)=>a+b,0) / G;
+    const sd = Math.sqrt(row.reduce((a,b)=>a+(b-mean)**2,0) / G) + 1e-6;
+    return row.map(x => (x - mean) / sd);
+  });
+}
+
+// ---------- اختيار النوافذ بدون تداخل
+function pickWindows(score, durs, cues, dur) {
+  const k = score.length, G = score[0].length, used = new Int32Array(G);
+  const order = [...Array(k).keys()].sort((a, b) => Math.max(...score[b]) - Math.max(...score[a]));
+  const res = new Array(k);
+  for (const i of order) {
+    const d = durs[i], w = Math.max(1, Math.min(G, Math.round(d / STEP)));
+    const c = [0]; score[i].forEach(x => c.push(c[c.length-1] + x));
+    const u = [0]; used.forEach(x => u.push(u[u.length-1] + x));
+    let best = -Infinity, bg = 0, bestFree = -Infinity, fg = -1;
+    for (let g = 0; g + w <= G; g++) {
+      const v = (c[g+w] - c[g]) / w;
+      if (v > best) { best = v; bg = g; }
+      if (u[g+w] - u[g] === 0 && v > bestFree) { bestFree = v; fg = g; }
+    }
+    const g = fg >= 0 ? fg : bg, val = fg >= 0 ? bestFree : best;
+    let start = g * STEP;
+    const near = cues.map(x => x.s).reduce((a, s) => Math.abs(s - start) < Math.abs(a - start) ? s : a, Infinity);
+    if (Math.abs(near - start) <= 3) start = near;
+    start = Math.max(0, Math.min(start, dur - d));
+    let end = start + d;
+    const ends = cues.map(x => x.e).filter(e => e <= end && e >= start + 0.6 * d);
+    if (ends.length) end = Math.max(...ends);
+    res[i] = { start, end, score: val };
+    for (let x = Math.max(0, Math.floor(start/STEP) - 1); x < Math.min(G, Math.floor(end/STEP) + 2); x++) used[x]++;
+  }
+  return res;
+}
+
+// ---------- الواجهة
+$("scf").onchange = async e => { const f = e.target.files[0]; if (f) $("sc").value = await f.text(); };
+const vidDuration = f => new Promise((ok, no) => { const v = $("vid"); v.src = URL.createObjectURL(f);
+  v.onloadedmetadata = () => ok(v.duration); v.onerror = () => no(new Error("تعذّر قراءة الفيديو. افتح هذا الملف من جهازك مباشرة (نقرتان) وليس من معاينة Claude، وتأكد أن الفيديو بصيغة MP4 (H.264)")); });
+
+$("an").onclick = async () => {
+  $("er").textContent = "";
+  try {
+    const vf = $("vf").files[0], sf = $("sf").files[0], script = $("sc").value.trim();
+    if (!vf || !sf || script.length < 20) throw new Error("اختر الفيديو وملف الترجمة والصق السكريبت");
+    if (!/\.(srt|vtt)$/i.test(sf.name)) throw new Error("حقل الترجمة يجب أن يحتوي ملف .srt أو .vtt وليس فيديو");
+    const dur = await vidDuration(vf);
+    const cues = parseSubs(await sf.text());
+    if (!cues.length) throw new Error("لم أجد ترجمة صالحة في الملف");
+    const target = Math.min(+$("tg").value || 300, Math.floor(dur)), G = Math.max(1, Math.floor(dur / STEP));
+    const groups = splitScript(script, target), durs = allocate(groups, target, dur);
+    const wins = pickWindows(buildScores(groups, cues, G), durs, cues, dur);
+    plan = wins.map((w, i) => ({ ...w, text: groups[i] }));
+    const box = $("plan"); box.textContent = "";
+    plan.forEach(p => { const d = document.createElement("div"), b = document.createElement("b"), t = document.createElement("span");
+      b.textContent = fmt(p.start) + " – " + fmt(p.end); t.textContent = p.text; d.append(b, t); box.append(d); });
+    $("tot").textContent = "(المجموع " + fmt(plan.reduce((a, p) => a + p.end - p.start, 0)) + ")";
+    $("pc").hidden = false;
+  } catch (e) { $("er").textContent = "خطأ: " + e.message; }
+};
+
+$("csv").onclick = () => {
+  const rows = [["#", "start", "end", "text"], ...plan.map((p, i) => [i + 1, p.start.toFixed(2), p.end.toFixed(2), '"' + p.text.replace(/"/g, '""') + '"'])];
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + rows.map(r => r.join(",")).join("\n")], { type: "text/csv" }));
+  a.download = "plan.csv"; a.click();
+};
+
+const once = (el, ev) => new Promise(r => el.addEventListener(ev, r, { once: true }));
+$("rd").onclick = async () => {
+  const v = $("vid"); $("rd").disabled = true; $("bw").hidden = false;
+  try {
+    const stream = (v.captureStream || v.mozCaptureStream).call(v);
+    const mime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find(m => MediaRecorder.isTypeSupported(m));
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5e6 }), chunks = [];
+    rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+    const total = plan.reduce((a, p) => a + p.end - p.start, 0); let done = 0;
+    rec.start(1000); rec.pause(); v.muted = false;
+    for (let i = 0; i < plan.length; i++) {
+      const p = plan[i]; $("st").textContent = "لقطة " + (i + 1) + " من " + plan.length;
+      v.currentTime = p.start; await once(v, "seeked");
+      await v.play(); rec.resume();
+      await new Promise(res => { const t = setInterval(() => {
+        $("bf").style.width = ((done + Math.max(0, v.currentTime - p.start)) / total * 100) + "%";
+        if (v.currentTime >= p.end || v.ended) { clearInterval(t); res(); } }, 40); });
+      rec.pause(); v.pause(); done += p.end - p.start;
+    }
+    rec.resume(); const stopped = once(rec, "stop"); rec.stop(); await stopped;
+    const url = URL.createObjectURL(new Blob(chunks, { type: "video/webm" }));
+    $("out").src = url; $("dl").href = url; $("rc").hidden = false; $("st").textContent = "اكتمل";
+  } catch (e) { $("st").textContent = "خطأ: " + e.message; }
+  $("rd").disabled = false;
+};
+</script>
+</body>
+</html>
